@@ -178,6 +178,7 @@ button[aria-pressed="true"]{background:var(--wind); border-color:var(--wind); co
     <div class="stamp">
       <b>QUASI-STATIC AERO MODEL</b>
       SPI 13.0 m² / POLE 2.00 m<br>
+      MAST EYE 1.00 m — FIXED<br>
       DISP 265 kg (crew incl.)<br>
       定性モデル — 数値は目安
     </div>
@@ -216,12 +217,12 @@ button[aria-pressed="true"]{background:var(--wind); border-color:var(--wind); co
       <section class="card">
         <div class="card-hd"><h2>Trim</h2><span class="jp">君が動かす2つ</span></div>
         <div class="ctrl-body">
-          <label class="ctrl" for="poleh">
-            <span class="ctrl-top"><span class="ctrl-name">ポール高さ <span>マストリング</span></span>
-              <span class="ctrl-val" id="poleh-v">1.30<em>m</em></span></span>
-            <span class="track"><input type="range" id="poleh" min="0.7" max="2.2" step="0.02" value="1.3"><i class="opt-mark" id="poleh-opt"></i></span>
-            <span class="scale"><span>0.70 低い</span><span>2.20 高い</span></span>
-            <span class="err" id="poleh-err"></span>
+          <label class="ctrl" for="elev">
+            <span class="ctrl-top"><span class="ctrl-name">トッピング <span>ポール仰角</span></span>
+              <span class="ctrl-val" id="elev-v">+5<em>°</em></span></span>
+            <span class="track"><input type="range" id="elev" min="-12" max="38" step="0.5" value="5"><i class="opt-mark" id="elev-opt"></i></span>
+            <span class="scale"><span>−12 下げる</span><span>+38 立てる</span></span>
+            <span class="err" id="elev-err"></span>
           </label>
           <label class="ctrl" for="guy">
             <span class="ctrl-top"><span class="ctrl-name">ガイ <span>ポール角（艇首基準）</span></span>
@@ -285,9 +286,12 @@ button[aria-pressed="true"]{background:var(--wind); border-color:var(--wind); co
         艇速が上がるとAWAが前に来るので、<b>速くなったらガイを緩める</b>。</p>
     </div>
     <div>
-      <h3>ポール高さの基準</h3>
-      <p>タックとクリューの高さが揃う位置。風が上がるほど、走りが深いほど帆は高く飛ぶので<b>ポールも上げる</b>。
-        低すぎるとラフが張りすぎて肩が締まり、高すぎるとラフが垂れて不安定に振れ出す。</p>
+      <h3>トッピングが変えるのは角度</h3>
+      <p>マストアイの高さは固定。トッピングとダウンホールがポール中央を上下させて、
+        アイを支点に<b>仰角</b>を変える。タック高さはその結果で
+        <code>タック高さ = 1.00 + 2.00·sin θ</code>。基準はタックとクリューが揃う高さで、
+        風が上がるほど、走りが深いほど帆は高く飛ぶので立てる。ただし
+        <b>立てるほど横への張り出しは cos θ で縮む</b>ので、トッピングを引いたらガイも引き直すこと。</p>
     </div>
     <div>
       <h3>このモデルの限界</h3>
@@ -308,7 +312,7 @@ const lerp=(a,b,t)=>a+(b-a)*t;
 /* ============ 1. 物理モデル ============ */
 const CFG={
   RHO:1.225, A_SPI:13.0, A_MAIN:9.12, MASS:265,
-  POLE:2.00, CHORD:2.85, HOIST:5.40,
+  POLE:2.00, EYE:1.00, CHORD:2.85, HOIST:5.40,   // EYE: マストアイ（固定）の高さ
   BOW:1.90, STERN:-2.80, HALFBEAM:0.84,
   K1:14, K2:26, K4:1.35
 };
@@ -322,6 +326,9 @@ function baseCoefs(awa){
   return {CL:1.45*Math.sin(a), CD:0.30+0.95*(1-Math.cos(a))/2};
 }
 function optPoleAngle(awa){ return clamp(awa-90,3,90); }
+// トッピングが変えるのは仰角。タック高さはその結果。
+function tackHeight(elev){ return CFG.EYE + CFG.POLE*Math.sin(elev*D); }
+function elevFor(h){ return Math.asin(clamp((h-CFG.EYE)/CFG.POLE,-1,1))*R; }
 function optPoleHeight(aws,awa){ return clamp(1.05+0.075*(aws-4)+0.006*(awa-100),0.85,2.05); }
 
 function efficiency(dPhi,dH){
@@ -358,21 +365,26 @@ function solveSpeed(tws,twa,etaFn){
 function simulate(s){
   const etaFn=(awa,aws)=>{
     const dPhi=s.guy-optPoleAngle(awa);
-    const dH=s.poleH-optPoleHeight(aws,awa);
+    const dH=tackHeight(s.elev)-optPoleHeight(aws,awa);
     return efficiency(dPhi,dH).eta;
   };
   const act=solveSpeed(s.tws,s.twa,etaFn);
   const best=solveSpeed(s.tws,s.twa,()=>1);
   const phiOpt=optPoleAngle(act.awa);
   const hOpt=optPoleHeight(act.aws,act.awa);
-  const dPhi=s.guy-phiOpt, dH=s.poleH-hOpt;
+  const tackZ=tackHeight(s.elev);
+  const elevOpt=elevFor(hOpt);
+  const dPhi=s.guy-phiOpt, dH=tackZ-hOpt;
+  // 仰角を上げるほど横への張り出しは cos で縮む
+  const reach=CFG.POLE*Math.cos(s.elev*D), reachLoss=CFG.POLE-reach;
   const eff=efficiency(dPhi,dH);
   const heel=clamp(R*Math.atan(act.side*3.2/(CFG.MASS*9.81*1.05)),0,40);
   const vmg=-act.v*Math.cos(s.twa*D);
   const curlQuality=eff.etaPole*(0.4+0.6*eff.etaGuy);
   const broke = eff.eta<0.30 || (eff.instability>0.80 && eff.etaGuy<0.62);
   const cantCarry = act.awa<68;
-  return {...act,...eff,best:best.v,phiOpt,hOpt,dPhi,dH,heel,vmg,curlQuality,broke,cantCarry};
+  return {...act,...eff,best:best.v,phiOpt,hOpt,elevOpt,tackZ,reach,reachLoss,
+          dPhi,dH,heel,vmg,curlQuality,broke,cantCarry};
 }
 
 /* ============ 2. 幾何（2つのビューで共有） ============ */
@@ -382,14 +394,15 @@ function geometry(s,r){
   const squareDir=Math.atan2(Math.cos(A),-Math.sin(A));     // 見かけ風に直角な向き
   const idealDir=squareDir + 25*D;                          // 正しく引けたときの弦（迎角ぶん開く）
   const chordDir=idealDir + r.dPhi*D*0.45;                  // ガイ誤差の一部だけシートが吸収する
-  const tack={x:CFG.POLE*Math.cos(s.guy*D), y:CFG.POLE*Math.sin(s.guy*D)};
+  const run=r.reach;                                        // 平面に投影したポール長 = POLE·cosθ
+  const tack={x:run*Math.cos(s.guy*D), y:run*Math.sin(s.guy*D)};
   const chord=CFG.CHORD*lerp(0.72,1.0,r.etaGuy);
   const clew={x:tack.x+chord*Math.cos(chordDir), y:tack.y+chord*Math.sin(chordDir)};
   // 後方ビュー：クリューは「自然に飛ぶ高さ」＝最適ポール高さ。ここにズレが出る。
   return {
     tack, clew, chordDir, idealDir, squareDir, trimErr:(chordDir-idealDir)*R,
-    tackZ:s.poleH, clewZ:r.hOpt,
-    tackY:CFG.POLE*Math.sin(s.guy*D), clewY:clew.y,
+    tackZ:r.tackZ, clewZ:r.hOpt, run,
+    tackY:run*Math.sin(s.guy*D), clewY:clew.y,
     camber:lerp(0.14,0.30,r.eta),
     shoulder:lerp(0.45,1.0,r.etaPole),
     luffSag:clamp(r.dH/0.7,0,1)
@@ -437,10 +450,13 @@ function arrow(c,x1,y1,x2,y2,col,lw,head){
   c.closePath(); c.fill(); c.restore();
 }
 function arc(c,cx,cy,rad,a1,a2,col,txt){
+  let d=a2-a1;                                   // 常に短いほうを回る
+  while(d> Math.PI) d-=2*Math.PI;
+  while(d<-Math.PI) d+=2*Math.PI;
   c.save(); c.strokeStyle=col; c.lineWidth=1.1; c.setLineDash([3,2.5]);
-  c.beginPath(); c.arc(cx,cy,rad,a1,a2,a2<a1); c.stroke(); c.setLineDash([]);
-  if(txt){ const m=(a1+a2)/2;
-    label(c,cx+Math.cos(m)*(rad+13),cy+Math.sin(m)*(rad+13),txt,col,"center",10,600); }
+  c.beginPath(); c.arc(cx,cy,rad,a1,a1+d,d<0); c.stroke(); c.setLineDash([]);
+  if(txt){ const m=a1+d/2;
+    label(c,cx+Math.cos(m)*(rad+14),cy+Math.sin(m)*(rad+14),txt,col,"center",10,600); }
   c.restore();
 }
 
@@ -487,7 +503,8 @@ function drawPlan(cv,s,r,g,t,showGhost){
   const mast=P(0,0);
   // お手本ポール
   if(showGhost){
-    const tg=P(CFG.POLE*Math.cos(r.phiOpt*D), CFG.POLE*Math.sin(r.phiOpt*D));
+    const rOpt=CFG.POLE*Math.cos(r.elevOpt*D);
+    const tg=P(rOpt*Math.cos(r.phiOpt*D), rOpt*Math.sin(r.phiOpt*D));
     c.save(); c.strokeStyle=css("--ok"); c.lineWidth=2; c.setLineDash([4,3.5]); c.globalAlpha=.85;
     c.beginPath(); c.moveTo(mast[0],mast[1]); c.lineTo(tg[0],tg[1]); c.stroke(); c.restore();
     label(c,tg[0],tg[1]-15,"お手本ポール "+r.phiOpt.toFixed(0)+"°",css("--ok"),"center",10,600);
@@ -565,21 +582,19 @@ function drawPlan(cv,s,r,g,t,showGhost){
 /* ============ 5. 後方ビュー ============ */
 function drawStern(cv,s,r,g,t,showGhost){
   const {c,w,h}=setupCanvas(cv);
-  const S=w/8.6, cx=w*0.54, base=h*0.90;
-  const P=(y,z)=>[cx-y*S, base-z*S];            // y:風上（左）, z:高さ
+  const S=w/8.6, cx=w*0.54, base=h*0.865;
+  const P=(y,z)=>[cx-y*S, base-z*S];            // y:風上（左）, z:デッキからの高さ
 
   c.fillStyle=css("--paper"); c.fillRect(0,0,w,h);
   grid(c,w,h,css("--grid"));
 
-  // 水面 + 高さスケール
-  c.save(); c.strokeStyle=css("--rule"); c.lineWidth=1;
-  c.beginPath(); c.moveTo(0,base+0.5); c.lineTo(w,base+0.5); c.stroke();
-  c.setLineDash([2,4]); c.strokeStyle=css("--rule-soft");
+  // 高さスケール
+  c.save(); c.setLineDash([2,4]); c.strokeStyle=css("--rule-soft"); c.lineWidth=1;
   for(let z=1;z<=6;z++){ const y=base-z*S; c.beginPath(); c.moveTo(0,y); c.lineTo(w,y); c.stroke();
     label(c,4,y-7,z+" m",css("--ink-3"),"left",9,400); }
   c.restore();
 
-  // 船体・マスト・ブーム
+  // 船体・マスト
   const HB=CFG.HALFBEAM;
   c.save(); c.fillStyle=css("--panel"); c.strokeStyle=css("--ink-2"); c.lineWidth=1.4;
   c.beginPath();
@@ -593,7 +608,7 @@ function drawStern(cv,s,r,g,t,showGhost){
   let m0=P(0,0.32), m1=P(0,6.55);
   c.beginPath(); c.moveTo(m0[0],m0[1]); c.lineTo(m1[0],m1[1]); c.stroke(); c.restore();
 
-  // メインセール（風下側へ張り出す）— スピンの背景
+  // メインセール（背景）
   const boomOut=-2.05*Math.min(1,Math.sin(clamp(r.awa,40,150)*D)+0.25);
   c.save(); c.fillStyle=css("--hatch"); c.globalAlpha=.20;
   c.beginPath();
@@ -606,34 +621,32 @@ function drawStern(cv,s,r,g,t,showGhost){
   c.beginPath(); c.moveTo(p[0],p[1]); c.lineTo(q[0],q[1]); c.stroke(); c.restore();
   label(c,P(boomOut*0.62,0.55)[0],P(boomOut*0.62,0.55)[1],"メイン",css("--ink-3"),"center",9.5,500);
 
-  // 座標
-  const tk=P(g.tackY,g.tackZ), cw=P(-Math.abs(g.clewY),g.clewZ);
+  // 主要点
   const clewYa=Math.abs(g.clewY);
+  const eye=P(0,CFG.EYE), tk=P(g.tackY,g.tackZ), cw=P(-clewYa,g.clewZ);
   const head=P((g.tackY-clewYa)*0.5,CFG.HOIST);
 
-  // お手本のポール高さ
-  if(showGhost){
-    c.save(); c.strokeStyle=css("--ok"); c.lineWidth=1.6; c.setLineDash([4,3.5]); c.globalAlpha=.9;
-    const go=P(g.tackY,r.hOpt), g2=P(0,r.hOpt);
-    c.beginPath(); c.moveTo(g2[0],g2[1]); c.lineTo(go[0],go[1]); c.stroke(); c.restore();
-    label(c,go[0]+4,go[1]-13,"お手本 "+r.hOpt.toFixed(2)+" m",css("--ok"),"left",9.5,600);
+  // お手本のポール（アイを支点に回した位置）
+  if(showGhost && Math.abs(s.elev-r.elevOpt)>1.5){
+    const gy=CFG.POLE*Math.cos(r.elevOpt*D)*Math.sin(s.guy*D);
+    const go=P(gy,r.hOpt);
+    c.save(); c.strokeStyle=css("--ok"); c.lineWidth=2; c.setLineDash([4,3.5]); c.globalAlpha=.9;
+    c.beginPath(); c.moveTo(eye[0],eye[1]); c.lineTo(go[0],go[1]); c.stroke(); c.restore();
+    label(c,go[0]-7,go[1]-13,"お手本 "+(r.elevOpt>=0?"+":"−")+Math.abs(r.elevOpt).toFixed(0)+"°",
+          css("--ok"),"right",9.5,600);
   }
 
   // スピネーカーの正面形
-  const sh=g.shoulder, sag=g.luffSag, br=r.broke;
-  const shrink=br?0.55:1;
+  const sh=g.shoulder, sag=g.luffSag, br=r.broke, shrink=br?0.55:1;
   c.save();
   c.beginPath();
   c.moveTo(head[0],head[1]);
-  // 風上側（ラフ）: 頭 → タック。肩はタックより外へ張り出す。垂れると風下へ落ちる。
   let c1=P((g.tackY*(0.80+0.50*sh)-sag*0.55)*shrink, CFG.HOIST*(0.70-0.05*sag));
   let c2=P((g.tackY*(1.10+0.45*sh)-sag*0.75)*shrink, g.tackZ+(CFG.HOIST-g.tackZ)*0.34);
   c.bezierCurveTo(c1[0],c1[1],c2[0],c2[1],tk[0],tk[1]);
-  // フット: タック → クリュー
   const footSag=lerp(0.55,0.16,r.eta);
   let cf=P((g.tackY-clewYa)/2, Math.min(g.tackZ,g.clewZ)-footSag);
   c.quadraticCurveTo(cf[0],cf[1],cw[0],cw[1]);
-  // 風下側（リーチ）: クリュー → 頭
   let c3=P(-clewYa*(1.10+0.45*sh)*shrink, g.clewZ+(CFG.HOIST-g.clewZ)*0.34);
   let c4=P(-clewYa*(0.80+0.50*sh)*shrink, CFG.HOIST*0.70);
   c.bezierCurveTo(c3[0],c3[1],c4[0],c4[1],head[0],head[1]);
@@ -645,32 +658,73 @@ function drawStern(cv,s,r,g,t,showGhost){
   if(br)c.setLineDash([6,4]);
   c.stroke(); c.restore();
 
-  // ポール
-  const ring=P(0,g.tackZ);
+  // 水平の基準線（仰角0＝ポール水平）
+  c.save(); c.strokeStyle=css("--rule"); c.lineWidth=1; c.setLineDash([4,4]);
+  const hz=P(CFG.POLE*0.62,CFG.EYE);
+  c.beginPath(); c.moveTo(eye[0],eye[1]); c.lineTo(hz[0],hz[1]); c.stroke(); c.restore();
+  label(c,hz[0]-3,hz[1]-9,"水平",css("--ink-3"),"right",9,500);
+
+  // トッピング / ダウンホール — ポール中央から上下へ
+  const mid=P(g.tackY/2,(CFG.EYE+g.tackZ)/2);
+  const upTop=P(0,3.25), dnBase=P(0,0.38);
+  c.save(); c.lineWidth=1.3; c.strokeStyle=css("--wind");
+  c.beginPath(); c.moveTo(mid[0],mid[1]); c.lineTo(upTop[0],upTop[1]); c.stroke();
+  c.setLineDash([3,3]); c.strokeStyle=css("--ink-3");
+  c.beginPath(); c.moveTo(mid[0],mid[1]); c.lineTo(dnBase[0],dnBase[1]); c.stroke();
+  c.restore();
+  label(c,(mid[0]+upTop[0])/2-7,(mid[1]+upTop[1])/2,"トッピング",css("--wind"),"right",10,600);
+  label(c,mid[0]+(dnBase[0]-mid[0])*0.80-7,mid[1]+(dnBase[1]-mid[1])*0.80,
+        "ダウンホール",css("--ink-3"),"right",9.5,500);
+  c.save(); c.fillStyle=css("--wind"); c.beginPath(); c.arc(mid[0],mid[1],3,0,7); c.fill(); c.restore();
+
+  // 仰角の弧
+  const elevA=Math.atan2(tk[1]-eye[1],tk[0]-eye[0]);
+  const hzA=Math.atan2(hz[1]-eye[1],hz[0]-eye[0]);
+  if(Math.abs(s.elev)>0.6){
+    arc(c,eye[0],eye[1],34,hzA,elevA,css("--ink"),
+        (s.elev>=0?"+":"−")+Math.abs(s.elev).toFixed(0)+"°");
+  }
+
+  // ポール本体 + 固定のマストアイ
   c.save(); c.strokeStyle=css("--ink"); c.lineWidth=4.5; c.lineCap="round";
-  c.beginPath(); c.moveTo(ring[0],ring[1]); c.lineTo(tk[0],tk[1]); c.stroke();
-  c.fillStyle=css("--ink"); c.fillRect(ring[0]-4,ring[1]-4,8,8); c.restore();
+  c.beginPath(); c.moveTo(eye[0],eye[1]); c.lineTo(tk[0],tk[1]); c.stroke(); c.restore();
+  c.save(); c.fillStyle=css("--panel"); c.strokeStyle=css("--ink"); c.lineWidth=2;
+  c.beginPath(); c.arc(eye[0],eye[1],5.5,0,7); c.fill(); c.stroke(); c.restore();
+  c.save(); c.strokeStyle=css("--ink-3"); c.lineWidth=.9;
+  c.beginPath(); c.moveTo(eye[0]+5,eye[1]+5); c.lineTo(eye[0]+30,eye[1]+30); c.stroke(); c.restore();
+  label(c,eye[0]+34,eye[1]+31,"マストアイ（固定）",css("--ink-2"),"left",9.5,600);
 
   // タック／クリューの高さ差 — この図の主役
   const dz=g.tackZ-g.clewZ;
   const sev=Math.abs(dz)<0.10?css("--ok"):Math.abs(dz)<0.30?css("--warn"):css("--bad");
+  const dimX=cw[0]+34;
   c.save(); c.strokeStyle=sev; c.lineWidth=1.1; c.setLineDash([3,3]);
-  c.beginPath(); c.moveTo(tk[0],tk[1]); c.lineTo(cw[0],tk[1]); c.stroke();
-  c.beginPath(); c.moveTo(cw[0],cw[1]); c.lineTo(cw[0]-26,cw[1]); c.stroke();
+  c.beginPath(); c.moveTo(tk[0],tk[1]); c.lineTo(dimX+8,tk[1]); c.stroke();
+  c.beginPath(); c.moveTo(cw[0],cw[1]); c.lineTo(dimX+8,cw[1]); c.stroke();
   c.setLineDash([]);
   if(Math.abs(dz)>0.03){
-    c.beginPath(); c.moveTo(cw[0]-13,tk[1]); c.lineTo(cw[0]-13,cw[1]); c.stroke();
-    arrow(c,cw[0]-13,(tk[1]+cw[1])/2,cw[0]-13,cw[1],sev,1.1,5);
-    arrow(c,cw[0]-13,(tk[1]+cw[1])/2,cw[0]-13,tk[1],sev,1.1,5);
+    c.beginPath(); c.moveTo(dimX,tk[1]); c.lineTo(dimX,cw[1]); c.stroke();
+    arrow(c,dimX,(tk[1]+cw[1])/2,dimX,cw[1],sev,1.1,5);
+    arrow(c,dimX,(tk[1]+cw[1])/2,dimX,tk[1],sev,1.1,5);
   }
   c.restore();
-  label(c,cw[0]-21,(tk[1]+cw[1])/2-9,(dz>=0?"+":"−")+Math.abs(dz).toFixed(2)+" m",sev,"right",11,600);
+  label(c,dimX+7,(tk[1]+cw[1])/2,(dz>=0?"+":"−")+Math.abs(dz).toFixed(2)+" m",sev,"left",11,600);
 
-  [[tk,"タック"],[cw,"クリュー"]].forEach(([pt,nm])=>{
+  [[tk,"タック",-9,-12,"right"],[cw,"クリュー",9,16,"left"]].forEach(([pt,nm,dx,dy,al])=>{
     c.save(); c.fillStyle=css("--force"); c.beginPath(); c.arc(pt[0],pt[1],4,0,7); c.fill();
     c.strokeStyle=css("--panel"); c.lineWidth=1.5; c.stroke(); c.restore();
-    label(c,pt[0],pt[1]+15,nm,css("--ink-2"),"center",9.5,500);
+    label(c,pt[0]+dx,pt[1]+dy,nm,css("--ink-2"),al,9.5,600);
   });
+
+  // 横への張り出し（cos効果）の寸法線
+  const dimZ=-0.42, d0=P(0,dimZ), d1=P(g.tackY,dimZ);
+  c.save(); c.strokeStyle=css("--ink-3"); c.lineWidth=.9; c.setLineDash([2,3]);
+  c.beginPath(); c.moveTo(tk[0],tk[1]+6); c.lineTo(d1[0],d1[1]); c.stroke();
+  c.beginPath(); c.moveTo(m0[0],m0[1]); c.lineTo(d0[0],d0[1]); c.stroke();
+  c.restore();
+  arrow(c,d0[0],d0[1],d1[0],d1[1],css("--ink-3"),1,5);
+  arrow(c,d1[0],d1[1],d0[0],d0[1],css("--ink-3"),1,5);
+  label(c,(d0[0]+d1[0])/2,d0[1]-9,"張り出し "+Math.abs(g.tackY).toFixed(2)+" m",css("--ink-3"),"center",9.5,600);
 
   tag(c,14,20,"VIEW FROM ASTERN",css("--ink-3"),10);
   label(c,14,40,"← 風上（ポール側）",css("--ink-3"),"left",10,500);
@@ -688,14 +742,16 @@ function diagnose(s,r){
 
   // ポール高さ
   const adH=Math.abs(r.dH), lv=sev(adH,0.12,0.32);
-  if(lv==="ok") out.push(["ok","ポール高さ：合っている",
+  if(lv==="ok") out.push(["ok","トッピング：合っている",
     "タックとクリューがほぼ同じ高さ。肩がきれいに張って、ラフのカールが素直に出ている。"]);
-  else if(r.dH<0) out.push([lv, adH>0.32?"ポール高さ：低すぎる":"ポール高さ：やや低い",
+  else if(r.dH<0) out.push([lv, adH>0.32?"トッピング：低すぎる":"トッピング：やや低い",
     "ラフが張りすぎて肩が締まり、受ける面積が減っている。タックがクリューより "+adH.toFixed(2)+
-    " m 低い。ポールを上げると肩が開いて、カールも読めるようになる。"]);
-  else out.push([lv, adH>0.32?"ポール高さ：高すぎる":"ポール高さ：やや高い",
+    " m 低い。トッピングを引いて仰角を "+(r.elevOpt>=0?"+":"−")+Math.abs(r.elevOpt).toFixed(0)+
+    "° まで起こす（ダウンホールは送る）。"]);
+  else out.push([lv, adH>0.32?"トッピング：立てすぎ":"トッピング：やや立ちすぎ",
     "ラフが垂れて帆が安定しない。タックがクリューより "+adH.toFixed(2)+
-    " m 高い。振れ出す前にポールを下げる。"]);
+    " m 高い。振れ出す前にダウンホールを引いて仰角を "+(r.elevOpt>=0?"+":"−")+
+    Math.abs(r.elevOpt).toFixed(0)+"° まで落とす。"]);
 
   // ガイ
   const adP=Math.abs(r.dPhi), gv=sev(adP,10,26);
@@ -714,6 +770,11 @@ function diagnose(s,r){
   else out.push(["ok","シート：カールの直前で保てている",
     "ラフが軽く巻いては戻る状態。ここがシートトリムの正解。"]);
 
+  // 仰角と張り出しの連動（cos効果）
+  if(s.elev>17) out.push([s.elev>26?"warn":"ok","ポールを立てたぶん、横への張り出しが減っている",
+    "仰角 "+s.elev.toFixed(0)+"° では横への張り出しが "+r.reach.toFixed(2)+" m（水平なら 2.00 m）。"+
+    Math.round(r.reachLoss*100)+" cm 分タックが内側に戻るので、トッピングを引いたらガイも引き直す。"]);
+
   // 状況コメント
   if(r.cantCarry) out.push(["warn","この角度ではスピンは苦しい",
     "艇速が上がって見かけ風が前に回り、AWA "+r.awa.toFixed(0)+"°。落として走るか、ジブに戻す判断を。"]);
@@ -727,10 +788,10 @@ function diagnose(s,r){
 }
 
 /* ============ 7. 配線 ============ */
-const S={tws:6,twa:140,poleH:1.30,guy:30};
+const S={tws:6,twa:140,elev:5,guy:30};
 let showGhost=true, raf=null;
 const $=id=>document.getElementById(id);
-const els={tws:$("tws"),twa:$("twa"),poleh:$("poleh"),guy:$("guy")};
+const els={tws:$("tws"),twa:$("twa"),elev:$("elev"),guy:$("guy")};
 
 function setOptMark(input,markEl,val){
   const min=+input.min,max=+input.max;
@@ -747,14 +808,15 @@ function render(t){
 
   $("tws-v").innerHTML=S.tws.toFixed(1)+"<em>m/s</em>";
   $("twa-v").innerHTML=S.twa.toFixed(0)+"<em>°</em>";
-  $("poleh-v").innerHTML=S.poleH.toFixed(2)+"<em>m</em>";
+  $("elev-v").innerHTML=(S.elev>=0?"+":"−")+Math.abs(S.elev).toFixed(0)+"<em>°</em>";
   $("guy-v").innerHTML=S.guy.toFixed(0)+"<em>°</em>";
-  setOptMark(els.poleh,$("poleh-opt"),r.hOpt);
+  setOptMark(els.elev,$("elev-opt"),r.elevOpt);
   setOptMark(els.guy,$("guy-opt"),r.phiOpt);
 
   const adH=Math.abs(r.dH), adP=Math.abs(r.dPhi);
-  chip($("poleh-err"), adH<0.12?"ok":adH<0.32?"warn":"bad",
-    "最適 "+r.hOpt.toFixed(2)+" m ／ ズレ "+(r.dH>=0?"+":"−")+adH.toFixed(2)+" m");
+  chip($("elev-err"), adH<0.12?"ok":adH<0.32?"warn":"bad",
+    "最適 "+(r.elevOpt>=0?"+":"−")+Math.abs(r.elevOpt).toFixed(0)+"° ／ タック "+
+    r.tackZ.toFixed(2)+" m（お手本 "+r.hOpt.toFixed(2)+" m）");
   chip($("guy-err"), adP<10?"ok":adP<26?"warn":"bad",
     "最適 "+r.phiOpt.toFixed(0)+"° ／ ズレ "+(r.dPhi>=0?"+":"−")+adP.toFixed(0)+"°");
 
@@ -780,18 +842,18 @@ function render(t){
 const reduce=window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 function loop(t){ render(t||0); if(!reduce) raf=requestAnimationFrame(loop); }
 
-["tws","twa","poleh","guy"].forEach(id=>{
+["tws","twa","elev","guy"].forEach(id=>{
   els[id].addEventListener("input",e=>{
     const v=+e.target.value;
     if(id==="tws")S.tws=v; else if(id==="twa")S.twa=v;
-    else if(id==="poleh")S.poleH=v; else S.guy=v;
+    else if(id==="elev")S.elev=v; else S.guy=v;
     if(reduce)render(0);
   });
 });
 $("snap").addEventListener("click",()=>{
   const r=simulate(S);
-  S.poleH=+r.hOpt.toFixed(2); S.guy=Math.round(r.phiOpt);
-  els.poleh.value=S.poleH; els.guy.value=S.guy;
+  S.elev=Math.round(r.elevOpt*2)/2; S.guy=Math.round(r.phiOpt);
+  els.elev.value=S.elev; els.guy.value=S.guy;
   if(reduce)render(0);
 });
 $("ghost").addEventListener("click",e=>{
@@ -799,15 +861,15 @@ $("ghost").addEventListener("click",e=>{
   if(reduce)render(0);
 });
 const PRESETS={
-  light:{tws:3,twa:155,poleH:1.15,guy:52},
-  mid:{tws:6,twa:135,poleH:1.20,guy:28},
-  heavy:{tws:11,twa:160,poleH:1.30,guy:40},
-  reach:{tws:7,twa:105,poleH:1.55,guy:35}
+  light:{tws:3,twa:155,elev:4,guy:52},
+  mid:{tws:6,twa:135,elev:6,guy:28},
+  heavy:{tws:11,twa:160,elev:9,guy:40},
+  reach:{tws:7,twa:105,elev:16,guy:35}
 };
 document.querySelectorAll("[data-preset]").forEach(b=>{
   b.addEventListener("click",()=>{
     Object.assign(S,PRESETS[b.dataset.preset]);
-    els.tws.value=S.tws; els.twa.value=S.twa; els.poleh.value=S.poleH; els.guy.value=S.guy;
+    els.tws.value=S.tws; els.twa.value=S.twa; els.elev.value=S.elev; els.guy.value=S.guy;
     if(reduce)render(0);
   });
 });
