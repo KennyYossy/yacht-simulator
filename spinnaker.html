@@ -247,6 +247,7 @@ button[aria-pressed="true"]{background:var(--wind); border-color:var(--wind); co
           <div class="btn-row">
             <button type="button" class="primary" id="snap">お手本トリムにする</button>
             <button type="button" id="ghost" aria-pressed="true">お手本を重ねる</button>
+            <button type="button" id="nums" aria-pressed="true">図の数値</button>
           </div>
         </div>
       </section>
@@ -305,6 +306,11 @@ button[aria-pressed="true"]{background:var(--wind); border-color:var(--wind); co
         艇速が上がるとAWAが前に来るので、<b>速くなったらガイを緩める</b>。</p>
     </div>
     <div>
+      <h3>動く点と、動かない点</h3>
+      <p>ヘッドはハリヤードで吊られているので<b>常にマスト上の同じ位置</b>。マストアイも固定。
+        動くのはタックとクリューの2点だけで、スピンの形はこの2点をどこに置くかで決まる。</p>
+    </div>
+    <div>
       <h3>トッピングが変えるのは角度</h3>
       <p>マストアイの高さは固定。トッピングとダウンホールがポール中央を上下させて、
         アイを支点に<b>仰角</b>を変える。タック高さはその結果で
@@ -333,7 +339,7 @@ const lerp=(a,b,t)=>a+(b-a)*t;
 /* ============ 1. 物理モデル ============ */
 const CFG={
   RHO:1.225, A_SPI:13.0, A_MAIN:9.12, MASS:265,
-  POLE:1.65, EYE:1.00, CHORD:2.85, HOIST:5.40,   // EYE: マストアイ（固定）の高さ
+  POLE:1.65, EYE:1.00, CHORD:2.85, HOIST:5.65,   // EYE: マストアイ（固定）／HOIST: ヘッドの位置（マストに固定）
   STAY_X:1.85, STAY_Z:0.30, HOUNDS:5.80,         // フォアステイ（ステム上端 → ハウンズ）
   BOW:1.95, STERN:-2.80, HALFBEAM:0.84,
   K1:14, K2:26, K4:1.35
@@ -516,7 +522,7 @@ function drawPlan(cv,s,r,g,t,showGhost){
   c.restore();
   const [wlx,wly]=P(-ux*5.4+1.0-py*0.2, -uy*5.4+px*0.2);
   tag(c,wlx-14,wly-16,"APPARENT WIND",css("--wind"));
-  label(c,wlx-14,wly+2,r.awa.toFixed(0)+"°  "+r.aws.toFixed(1)+" m/s",css("--wind"),"left",11,600);
+  if(showNums) label(c,wlx-14,wly+2,r.awa.toFixed(0)+"°  "+r.aws.toFixed(1)+" m/s",css("--wind"),"left",11,600);
 
   // 艇（上から）
   c.save(); c.beginPath();
@@ -541,12 +547,12 @@ function drawPlan(cv,s,r,g,t,showGhost){
     const tg=P(rOpt*Math.cos(r.phiOpt*D), rOpt*Math.sin(r.phiOpt*D));
     c.save(); c.strokeStyle=css("--ok"); c.lineWidth=2; c.setLineDash([4,3.5]); c.globalAlpha=.85;
     c.beginPath(); c.moveTo(mast[0],mast[1]); c.lineTo(tg[0],tg[1]); c.stroke(); c.restore();
-    label(c,tg[0],tg[1]-15,"お手本ポール "+r.phiOpt.toFixed(0)+"°",css("--ok"),"center",10,600);
+    label(c,tg[0],tg[1]-15,"お手本ポール"+(showNums?" "+r.phiOpt.toFixed(0)+"°":""),css("--ok"),"center",10,600);
   }
 
   // ポール角の円弧
   const bow=P(B,0);
-  arc(c,mast[0],mast[1],74,Math.atan2(bow[1]-mast[1],bow[0]-mast[0]),
+  if(showNums) arc(c,mast[0],mast[1],74,Math.atan2(bow[1]-mast[1],bow[0]-mast[0]),
       Math.atan2(P(g.tack.x,g.tack.y)[1]-mast[1],P(g.tack.x,g.tack.y)[0]-mast[0]),
       css("--ink-3"),r.guyEff.toFixed(0)+"°");
 
@@ -597,7 +603,7 @@ function drawPlan(cv,s,r,g,t,showGhost){
     const ic=P(g.tack.x+CFG.CHORD*Math.cos(g.idealDir), g.tack.y+CFG.CHORD*Math.sin(g.idealDir));
     c.save(); c.strokeStyle=css("--ok"); c.lineWidth=1.4; c.setLineDash([4,3.5]); c.globalAlpha=.9;
     c.beginPath(); c.moveTo(tk[0],tk[1]); c.lineTo(ic[0],ic[1]); c.stroke(); c.restore();
-    arc(c,tk[0],tk[1],56,
+    if(showNums) arc(c,tk[0],tk[1],56,
         Math.atan2(ic[1]-tk[1],ic[0]-tk[0]),
         Math.atan2(cw[1]-tk[1],cw[0]-tk[0]),
         css("--bad"),(g.trimErr>0?"+":"−")+Math.abs(g.trimErr).toFixed(0)+"° ズレ");
@@ -625,7 +631,7 @@ function drawStern(cv,s,r,g,t,showGhost){
   // 高さスケール
   c.save(); c.setLineDash([2,4]); c.strokeStyle=css("--rule-soft"); c.lineWidth=1;
   for(let z=1;z<=6;z++){ const y=base-z*S; c.beginPath(); c.moveTo(0,y); c.lineTo(w,y); c.stroke();
-    label(c,4,y-7,z+" m",css("--ink-3"),"left",9,400); }
+    if(showNums) label(c,4,y-7,z+" m",css("--ink-3"),"left",9,400); }
   c.restore();
 
   // 船体・マスト
@@ -653,12 +659,12 @@ function drawStern(cv,s,r,g,t,showGhost){
   c.save(); c.strokeStyle=css("--ink-3"); c.lineWidth=2; c.globalAlpha=.6;
   p=P(0,1.0); q=P(boomOut,0.88);
   c.beginPath(); c.moveTo(p[0],p[1]); c.lineTo(q[0],q[1]); c.stroke(); c.restore();
-  label(c,P(boomOut*0.62,0.55)[0],P(boomOut*0.62,0.55)[1],"メイン",css("--ink-3"),"center",9.5,500);
+  label(c,P(boomOut*1.06,0.62)[0],P(boomOut*1.06,0.62)[1],"メイン",css("--ink-3"),"center",9.5,500);
 
   // 主要点
   const clewYa=Math.abs(g.clewY);
   const eye=P(0,CFG.EYE), tk=P(g.tackY,g.tackZ), cw=P(-clewYa,g.clewZ);
-  const head=P((g.tackY-clewYa)*0.5,CFG.HOIST);
+  const head=P(0,CFG.HOIST);            // ヘッドはハリヤードでマストに吊られている＝常にマスト上
 
   // お手本のポール（アイを支点に回した位置）
   if(showGhost && Math.abs(s.elev-r.elevOpt)>1.5){
@@ -666,7 +672,7 @@ function drawStern(cv,s,r,g,t,showGhost){
     const go=P(gy,r.hOpt);
     c.save(); c.strokeStyle=css("--ok"); c.lineWidth=2; c.setLineDash([4,3.5]); c.globalAlpha=.9;
     c.beginPath(); c.moveTo(eye[0],eye[1]); c.lineTo(go[0],go[1]); c.stroke(); c.restore();
-    label(c,go[0]-7,go[1]-13,"お手本 "+(r.elevOpt>=0?"+":"−")+Math.abs(r.elevOpt).toFixed(0)+"°",
+    label(c,go[0]-7,go[1]-13,"お手本"+(showNums?" "+(r.elevOpt>=0?"+":"−")+Math.abs(r.elevOpt).toFixed(0)+"°":""),
           css("--ok"),"right",9.5,600);
   }
 
@@ -692,11 +698,14 @@ function drawStern(cv,s,r,g,t,showGhost){
   if(br)c.setLineDash([6,4]);
   c.stroke(); c.restore();
 
-  // 水平の基準線（仰角0＝ポール水平）
-  c.save(); c.strokeStyle=css("--rule"); c.lineWidth=1; c.setLineDash([4,4]);
+  // 水平の基準線（仰角0＝ポール水平）。横成分が十分あるときだけ角度が真値になる。
+  const sideOn=Math.sin(r.guyEff*D);
   const hz=P(CFG.POLE*0.62,CFG.EYE);
-  c.beginPath(); c.moveTo(eye[0],eye[1]); c.lineTo(hz[0],hz[1]); c.stroke(); c.restore();
-  label(c,hz[0]-3,hz[1]-9,"水平",css("--ink-3"),"right",9,500);
+  if(showNums && sideOn>0.80){
+    c.save(); c.strokeStyle=css("--rule"); c.lineWidth=1; c.setLineDash([4,4]);
+    c.beginPath(); c.moveTo(eye[0],eye[1]); c.lineTo(hz[0],hz[1]); c.stroke(); c.restore();
+    label(c,hz[0]-3,hz[1]+12,"水平",css("--ink-3"),"right",9,500);
+  }
 
   // トッピング / ダウンホール — ポール中央から上下へ
   const mid=P(g.tackY/2,(CFG.EYE+g.tackZ)/2);
@@ -714,9 +723,13 @@ function drawStern(cv,s,r,g,t,showGhost){
   // 仰角の弧
   const elevA=Math.atan2(tk[1]-eye[1],tk[0]-eye[0]);
   const hzA=Math.atan2(hz[1]-eye[1],hz[0]-eye[0]);
-  if(Math.abs(s.elev)>0.6){
-    arc(c,eye[0],eye[1],34,hzA,elevA,css("--ink"),
+  if(showNums && sideOn>0.80 && Math.abs(s.elev)>0.6){
+    arc(c,eye[0],eye[1],40,hzA,elevA,css("--ink"),
         (s.elev>=0?"+":"−")+Math.abs(s.elev).toFixed(0)+"°");
+  }else if(showNums && sideOn<=0.80){
+    label(c,w-14,h-38,"ポール角 "+r.guyEff.toFixed(0)+"° — 後方からは仰角が縮む",
+          css("--ink-3"),"right",10,500);
+    label(c,w-14,h-24,"仰角は側面ビューで見る",css("--ink-3"),"right",10,500);
   }
 
   // ポール本体 + 固定のマストアイ
@@ -731,18 +744,18 @@ function drawStern(cv,s,r,g,t,showGhost){
   // タック／クリューの高さ差 — この図の主役
   const dz=g.tackZ-g.clewZ;
   const sev=Math.abs(dz)<0.10?css("--ok"):Math.abs(dz)<0.30?css("--warn"):css("--bad");
-  const dimX=cw[0]+34;
+  const dimX=cw[0]+(showNums?34:14);
   c.save(); c.strokeStyle=sev; c.lineWidth=1.1; c.setLineDash([3,3]);
   c.beginPath(); c.moveTo(tk[0],tk[1]); c.lineTo(dimX+8,tk[1]); c.stroke();
   c.beginPath(); c.moveTo(cw[0],cw[1]); c.lineTo(dimX+8,cw[1]); c.stroke();
   c.setLineDash([]);
-  if(Math.abs(dz)>0.03){
+  if(showNums && Math.abs(dz)>0.03){
     c.beginPath(); c.moveTo(dimX,tk[1]); c.lineTo(dimX,cw[1]); c.stroke();
     arrow(c,dimX,(tk[1]+cw[1])/2,dimX,cw[1],sev,1.1,5);
     arrow(c,dimX,(tk[1]+cw[1])/2,dimX,tk[1],sev,1.1,5);
   }
   c.restore();
-  label(c,dimX+7,(tk[1]+cw[1])/2,(dz>=0?"+":"−")+Math.abs(dz).toFixed(2)+" m",sev,"left",11,600);
+  if(showNums) label(c,dimX+7,(tk[1]+cw[1])/2,(dz>=0?"+":"−")+Math.abs(dz).toFixed(2)+" m",sev,"left",11,600);
 
   [[tk,"タック",-9,-12,"right"],[cw,"クリュー",9,16,"left"]].forEach(([pt,nm,dx,dy,al])=>{
     c.save(); c.fillStyle=css("--force"); c.beginPath(); c.arc(pt[0],pt[1],4,0,7); c.fill();
@@ -751,14 +764,16 @@ function drawStern(cv,s,r,g,t,showGhost){
   });
 
   // 横への張り出し（cos効果）の寸法線
-  const dimZ=-0.42, d0=P(0,dimZ), d1=P(g.tackY,dimZ);
-  c.save(); c.strokeStyle=css("--ink-3"); c.lineWidth=.9; c.setLineDash([2,3]);
-  c.beginPath(); c.moveTo(tk[0],tk[1]+6); c.lineTo(d1[0],d1[1]); c.stroke();
-  c.beginPath(); c.moveTo(m0[0],m0[1]); c.lineTo(d0[0],d0[1]); c.stroke();
-  c.restore();
-  arrow(c,d0[0],d0[1],d1[0],d1[1],css("--ink-3"),1,5);
-  arrow(c,d1[0],d1[1],d0[0],d0[1],css("--ink-3"),1,5);
-  label(c,(d0[0]+d1[0])/2,d0[1]-9,"張り出し "+Math.abs(g.tackY).toFixed(2)+" m",css("--ink-3"),"center",9.5,600);
+  if(showNums){
+    const dimZ=-0.42, d0=P(0,dimZ), d1=P(g.tackY,dimZ);
+    c.save(); c.strokeStyle=css("--ink-3"); c.lineWidth=.9; c.setLineDash([2,3]);
+    c.beginPath(); c.moveTo(tk[0],tk[1]+6); c.lineTo(d1[0],d1[1]); c.stroke();
+    c.beginPath(); c.moveTo(m0[0],m0[1]); c.lineTo(d0[0],d0[1]); c.stroke();
+    c.restore();
+    arrow(c,d0[0],d0[1],d1[0],d1[1],css("--ink-3"),1,5);
+    arrow(c,d1[0],d1[1],d0[0],d0[1],css("--ink-3"),1,5);
+    label(c,(d0[0]+d1[0])/2,d0[1]-9,"張り出し "+Math.abs(g.tackY).toFixed(2)+" m",css("--ink-3"),"center",9.5,600);
+  }
 
   tag(c,14,20,"VIEW FROM ASTERN",css("--ink-3"),10);
   label(c,14,40,"← 風上（ポール側）",css("--ink-3"),"left",10,500);
@@ -781,7 +796,7 @@ function drawProfile(cv,s,r,g,t,showGhost){
 
   c.save(); c.setLineDash([2,4]); c.strokeStyle=css("--rule-soft"); c.lineWidth=1;
   for(let z=1;z<=6;z++){ const y=base-z*S; c.beginPath(); c.moveTo(0,y); c.lineTo(w,y); c.stroke();
-    label(c,w-4,y-7,z+" m",css("--ink-3"),"right",9,400); }
+    if(showNums) label(c,w-4,y-7,z+" m",css("--ink-3"),"right",9,400); }
   c.restore();
 
   // 船体側面
@@ -866,15 +881,15 @@ function drawProfile(cv,s,r,g,t,showGhost){
   // 水平基準と仰角 — 前後成分が十分あるときだけ角度を示す
   const foreshorten=Math.cos(r.guyEff*D);
   const hz=P(CFG.POLE*0.80,CFG.EYE);
-  if(foreshorten>0.80 && Math.abs(s.elev)>=2.5){
+  if(showNums && foreshorten>0.80 && Math.abs(s.elev)>=2.5){
     c.save(); c.strokeStyle=css("--rule"); c.lineWidth=1; c.setLineDash([4,4]);
     c.beginPath(); c.moveTo(eye[0],eye[1]); c.lineTo(hz[0],hz[1]); c.stroke(); c.restore();
     label(c,hz[0]-3,hz[1]+11,"水平",css("--ink-3"),"right",9,500);
-    arc(c,eye[0],eye[1],34,
+    if(showNums) arc(c,eye[0],eye[1],34,
         Math.atan2(hz[1]-eye[1],hz[0]-eye[0]),
         Math.atan2(tk[1]-eye[1],tk[0]-eye[0]),
         css("--ink"),(s.elev>=0?"+":"−")+Math.abs(s.elev).toFixed(0)+"°");
-  }else if(foreshorten<=0.80){
+  }else if(showNums && foreshorten<=0.80){
     label(c,w-14,h-38,"ポール角 "+r.guyEff.toFixed(0)+"° — 真横からは仰角が縮む",
           css("--ink-3"),"right",10,500);
     label(c,w-14,h-24,"仰角は後方ビューで見る",css("--ink-3"),"right",10,500);
@@ -902,7 +917,7 @@ function drawProfile(cv,s,r,g,t,showGhost){
   const gp=P(forestayX(g.tackZ),g.tackZ);
   if(r.atStay || gap<0.06){
     tag(c,14,62,"ポールはフォアステイに当たっている",css("--bad"),10);
-  }else{
+  }else if(showNums){
     c.save(); c.strokeStyle=css("--ink-3"); c.lineWidth=1; c.setLineDash([2,3]);
     c.beginPath(); c.moveTo(gp[0],gp[1]-16); c.lineTo(gp[0],gp[1]+8); c.stroke(); c.restore();
     arrow(c,tk[0],tk[1]-30,gp[0],gp[1]-30,css("--ink-3"),1,5);
@@ -917,13 +932,15 @@ function drawProfile(cv,s,r,g,t,showGhost){
   });
 
   // 前への張り出しの寸法線
-  const dimZ=-0.50, d0=P(0,dimZ), d1=P(g.tackX,dimZ);
-  c.save(); c.strokeStyle=css("--ink-3"); c.lineWidth=.9; c.setLineDash([2,3]);
-  c.beginPath(); c.moveTo(tk[0],tk[1]+6); c.lineTo(d1[0],d1[1]); c.stroke();
-  c.beginPath(); c.moveTo(m0[0],m0[1]); c.lineTo(d0[0],d0[1]); c.stroke(); c.restore();
-  arrow(c,d0[0],d0[1],d1[0],d1[1],css("--ink-3"),1,5);
-  arrow(c,d1[0],d1[1],d0[0],d0[1],css("--ink-3"),1,5);
-  label(c,(d0[0]+d1[0])/2,d0[1]-14,"前への張り出し "+g.tackX.toFixed(2)+" m",css("--ink-3"),"center",9.5,600);
+  if(showNums){
+    const dimZ=-0.50, d0=P(0,dimZ), d1=P(g.tackX,dimZ);
+    c.save(); c.strokeStyle=css("--ink-3"); c.lineWidth=.9; c.setLineDash([2,3]);
+    c.beginPath(); c.moveTo(tk[0],tk[1]+6); c.lineTo(d1[0],d1[1]); c.stroke();
+    c.beginPath(); c.moveTo(m0[0],m0[1]); c.lineTo(d0[0],d0[1]); c.stroke(); c.restore();
+    arrow(c,d0[0],d0[1],d1[0],d1[1],css("--ink-3"),1,5);
+    arrow(c,d1[0],d1[1],d0[0],d0[1],css("--ink-3"),1,5);
+    label(c,(d0[0]+d1[0])/2,d0[1]-14,"前への張り出し "+g.tackX.toFixed(2)+" m",css("--ink-3"),"center",9.5,600);
+  }
 
   tag(c,14,20,"VIEW FROM PORT SIDE",css("--ink-3"),10);
   label(c,14,40,"← 艇首",css("--ink-3"),"left",10,500);
@@ -993,7 +1010,7 @@ function diagnose(s,r){
 
 /* ============ 7. 配線 ============ */
 const S={tws:6,twa:140,elev:5,guy:30};
-let showGhost=true, raf=null, view2="stern";
+let showGhost=true, showNums=true, raf=null, view2="stern";
 const $=id=>document.getElementById(id);
 const els={tws:$("tws"),twa:$("twa"),elev:$("elev"),guy:$("guy")};
 
@@ -1086,6 +1103,10 @@ document.querySelectorAll(".tab").forEach(b=>{
 });
 $("ghost").addEventListener("click",e=>{
   showGhost=!showGhost; e.currentTarget.setAttribute("aria-pressed",String(showGhost));
+  if(reduce)render(0);
+});
+$("nums").addEventListener("click",e=>{
+  showNums=!showNums; e.currentTarget.setAttribute("aria-pressed",String(showNums));
   if(reduce)render(0);
 });
 const PRESETS={
