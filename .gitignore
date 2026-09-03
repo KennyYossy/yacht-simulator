@@ -1,1 +1,4 @@
 node_modules/
+
+# spinnaker.html から生成される。CI が作って Pages へ配信するのでコミットしない。
+index.html

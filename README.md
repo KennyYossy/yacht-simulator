@@ -75,12 +75,23 @@
 
 ## ファイル
 
-- `spinnaker.html` — 本体。Claude の Artifact として公開する形式（`<head>`/`<body>` のラッパは公開時にホスト側が付ける）
+- `spinnaker.html` — **唯一の情報源。** 直すのはここだけ。Claude の Artifact として公開する形式で、
+  `<head>`/`<body>` のラッパは公開時にホスト側が付く
 - `build.mjs` — 上記からブラウザで直接開ける `index.html` を生成する
-- `index.html` — 生成物。`node build.mjs` で更新する
+- `.github/workflows/pages.yml` — push のたびにビルドして GitHub Pages へ配信する
+
+`index.html` は生成物なのでコミットしない（`.gitignore` 済み）。手元で見るときだけ作る。
 
 ```
 node build.mjs && open index.html
 ```
 
 外部依存は Google Fonts のみ。ビルドツールもパッケージも不要。
+
+## 公開
+
+デフォルトブランチに push すると Actions が `index.html` を生成して Pages へ配信する。
+公開URLは `https://kennyyossy.github.io/yacht-simulator/`。
+
+初回だけ、リポジトリの **Settings → Pages → Source** が **GitHub Actions** になっている必要がある。
+ワークフローの `configure-pages` が自動で設定を試みるが、権限が足りない場合は手動で切り替える。
