@@ -317,8 +317,8 @@ button[aria-pressed="true"]{background:var(--wind); border-color:var(--wind); co
         <code>タック高さ = 1.00 + 1.65·sin θ</code>。基準はタックとクリューが揃う高さで、
         風が上がるほど、走りが深いほど帆は高く飛ぶので立てる。ただし
         <b>立てるほど横への張り出しは cos θ で縮む</b>ので、トッピングを引いたらガイも引き直すこと。
-        さらにポールを立てると先端がフォアステイの細くなる高さに上がるため、
-        <b>前に出せる限界も浅くなる</b>。リーチングでポールを下げるのはこのため。</p>
+        なお前方の限界はフォアステイだが、これはポールがほぼ艇首を向いたときに当たるもので、
+        <b>仰角にはほとんど依らない</b>（ステイは中心面にあり、ポールは前に出すほどそこから外れるため）。</p>
     </div>
     <div>
       <h3>このモデルの限界</h3>
@@ -353,18 +353,42 @@ function baseCoefs(awa){
   const a=awa*D;
   return {CL:1.45*Math.sin(a), CD:0.30+0.95*(1-Math.cos(a))/2};
 }
-// 高さ z におけるフォアステイの前後位置
+// 高さ z におけるフォアステイの前後位置（側面図の作図用）
 function forestayX(z){
   return clamp(CFG.STAY_X*(CFG.HOUNDS-z)/(CFG.HOUNDS-CFG.STAY_Z),0,CFG.STAY_X);
 }
-// ポールはフォアステイより前へ出せない。仰角ごとに最小のポール角が決まる。
-function minPoleAngle(elev){
-  const run=CFG.POLE*Math.cos(elev*D);
-  const z=CFG.EYE+CFG.POLE*Math.sin(elev*D);
-  const xs=forestayX(z);
-  return xs>=run ? 0 : Math.acos(clamp(xs/run,-1,1))*R;
+// ポールとフォアステイの最短距離（3D）。
+// ステイは中心面 y=0 にあり、ポールは φ>0 で中心面から外れるので、
+// 前後座標の比較では接触判定にならない。線分どうしの距離で厳密に見る。
+const STAY_A=[CFG.STAY_X,0,CFG.STAY_Z], STAY_B=[0,0,CFG.HOUNDS];
+function segDist(p1,q1,p2,q2){
+  const sub=(a,b)=>[a[0]-b[0],a[1]-b[1],a[2]-b[2]];
+  const dot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
+  const at=(a,b,t)=>[a[0]+b[0]*t,a[1]+b[1]*t,a[2]+b[2]*t];
+  const d1=sub(q1,p1), d2=sub(q2,p2), r0=sub(p1,p2);
+  const a=dot(d1,d1), e=dot(d2,d2), f=dot(d2,r0), c0=dot(d1,r0), b=dot(d1,d2);
+  const den=a*e-b*b;
+  let sN = den!==0 ? clamp((b*f-c0*e)/den,0,1) : 0;
+  let t = (b*sN+f)/e;
+  if(t<0){ t=0; sN=clamp(-c0/a,0,1); } else if(t>1){ t=1; sN=clamp((b-c0)/a,0,1); }
+  const v=sub(at(p1,d1,sN),at(p2,d2,t));
+  return Math.sqrt(dot(v,v));
 }
-function optPoleAngle(awa,elev){ return clamp(awa-90,minPoleAngle(elev),90); }
+function poleTip3(elev,guy){
+  const run=CFG.POLE*Math.cos(elev*D);
+  return [run*Math.cos(guy*D), run*Math.sin(guy*D), CFG.EYE+CFG.POLE*Math.sin(elev*D)];
+}
+function stayClearance(elev,guy){
+  return segDist([0,0,CFG.EYE],poleTip3(elev,guy),STAY_A,STAY_B);
+}
+// 5 cm の余裕を切る手前が前方限界。実際にはほぼ φ≈2°、仰角にはほとんど依らない。
+function minPoleAngle(elev){
+  if(stayClearance(elev,0)>0.05) return 0;
+  let lo=0, hi=90;
+  for(let i=0;i<40;i++){ const m=(lo+hi)/2; if(stayClearance(elev,m)<0.05) lo=m; else hi=m; }
+  return hi;
+}
+function optPoleAngle(awa,gMin){ return clamp(awa-90,gMin,90); }
 // トッピングが変えるのは仰角。タック高さはその結果。
 function tackHeight(elev){ return CFG.EYE + CFG.POLE*Math.sin(elev*D); }
 function elevFor(h){ return Math.asin(clamp((h-CFG.EYE)/CFG.POLE,-1,1))*R; }
@@ -402,15 +426,16 @@ function solveSpeed(tws,twa,etaFn){
 }
 
 function simulate(s){
-  const gMin=minPoleAngle(s.elev), guyEff=Math.max(s.guy,gMin), atStay=s.guy<gMin-0.4;
+  const gMin=minPoleAngle(s.elev), guyEff=Math.max(s.guy,gMin);
+  const stayGap=stayClearance(s.elev,guyEff), atStay=stayGap<0.10;
   const etaFn=(awa,aws)=>{
-    const dPhi=guyEff-optPoleAngle(awa,s.elev);
+    const dPhi=guyEff-optPoleAngle(awa,gMin);
     const dH=tackHeight(s.elev)-optPoleHeight(aws,awa);
     return efficiency(dPhi,dH).eta;
   };
   const act=solveSpeed(s.tws,s.twa,etaFn);
   const best=solveSpeed(s.tws,s.twa,()=>1);
-  const phiOpt=optPoleAngle(act.awa,s.elev);
+  const phiOpt=optPoleAngle(act.awa,gMin);
   const hOpt=optPoleHeight(act.aws,act.awa);
   const tackZ=tackHeight(s.elev);
   const elevOpt=elevFor(hOpt);
@@ -424,7 +449,7 @@ function simulate(s){
   const broke = eff.eta<0.30 || (eff.instability>0.80 && eff.etaGuy<0.62);
   const cantCarry = act.awa<68;
   return {...act,...eff,best:best.v,phiOpt,hOpt,elevOpt,tackZ,reach,reachLoss,
-          gMin,guyEff,atStay,dPhi,dH,heel,vmg,curlQuality,broke,cantCarry};
+          gMin,guyEff,atStay,stayGap,dPhi,dH,heel,vmg,curlQuality,broke,cantCarry};
 }
 
 /* ============ 2. 幾何（2つのビューで共有） ============ */
@@ -912,17 +937,16 @@ function drawProfile(cv,s,r,g,t,showGhost){
   c.beginPath(); c.arc(eye[0],eye[1],5.5,0,7); c.fill(); c.stroke(); c.restore();
   label(c,eye[0],eye[1]+22,"マストアイ（固定）",css("--ink-2"),"center",9.5,600);
 
-  // フォアステイまでの余裕 — リーチングの主役
-  const gap=forestayX(g.tackZ)-g.tackX;
+  // フォアステイまでの余裕。側面図は中心面への投影なので、これは3D最短距離であって
+  // 図の上の見た目の隙間ではない。引き出し線でその旨がわかるようにする。
   const gp=P(forestayX(g.tackZ),g.tackZ);
-  if(r.atStay || gap<0.06){
-    tag(c,14,62,"ポールはフォアステイに当たっている",css("--bad"),10);
+  if(r.atStay){
+    tag(c,14,62,"ポールがフォアステイに接触",css("--bad"),10);
   }else if(showNums){
     c.save(); c.strokeStyle=css("--ink-3"); c.lineWidth=1; c.setLineDash([2,3]);
-    c.beginPath(); c.moveTo(gp[0],gp[1]-16); c.lineTo(gp[0],gp[1]+8); c.stroke(); c.restore();
-    arrow(c,tk[0],tk[1]-30,gp[0],gp[1]-30,css("--ink-3"),1,5);
-    arrow(c,gp[0],gp[1]-30,tk[0],tk[1]-30,css("--ink-3"),1,5);
-    label(c,(tk[0]+gp[0])/2,tk[1]-41,"ステイまで "+Math.round(gap*100)+" cm",css("--ink-3"),"center",9.5,600);
+    c.beginPath(); c.moveTo(tk[0],tk[1]-28); c.lineTo(gp[0],gp[1]-28); c.stroke(); c.restore();
+    label(c,(tk[0]+gp[0])/2,tk[1]-40,"ステイまで "+Math.round(r.stayGap*100)+" cm（3D）",
+          css("--ink-3"),"center",9.5,600);
   }
 
   [[tk,"タック",-10,-13,"right"],[cw,"クリュー",11,15,"left"]].forEach(([pt,nm,dx,dy,al])=>{
@@ -982,14 +1006,10 @@ function diagnose(s,r){
   else out.push(["ok","シート：カールの直前で保てている",
     "ラフが軽く巻いては戻る状態。ここがシートトリムの正解。"]);
 
-  if(r.awa<95 && s.elev>10) out.push(["warn","リーチングでポールが立ちすぎ",
-    "AWA "+r.awa.toFixed(0)+"° の詰めた角度。ポールを立てるとフォアステイ側の限界が "+
-    r.gMin.toFixed(0)+"° まで下がってきて、前に出せなくなる。リーチングはまずポールを下げる。"]);
-
-  // フォアステイ拘束
-  if(r.atStay) out.push(["warn","ポールがフォアステイに当たっている",
-    "この仰角ではポール角 "+r.gMin.toFixed(0)+"° より前へ出せない。もっと前に出したいなら、"+
-    "先にトッピングを下げること。ポールは下げるほど前へ出せる。"]);
+  // フォアステイ拘束（前方限界はほぼ艇首方向。仰角にはほとんど依らない）
+  if(r.atStay) out.push(["warn","ポールがフォアステイに接触",
+    "ポールがほぼ艇首を向いていて、これ以上前へは出せない。"+
+    "この角度でまだガイを送りたくなるなら、コース自体が詰まりすぎている。"]);
 
   // 仰角と張り出しの連動（cos効果）
   if(s.elev>17) out.push([s.elev>26?"warn":"ok","ポールを立てたぶん、横への張り出しが減っている",
@@ -1089,7 +1109,7 @@ function loop(t){ render(t||0); if(!reduce) raf=requestAnimationFrame(loop); }
 $("snap").addEventListener("click",()=>{
   const r=simulate(S);
   S.elev=Math.round(r.elevOpt*2)/2;
-  S.guy=Math.round(Math.max(r.phiOpt,minPoleAngle(S.elev)));
+  S.guy=Math.max(Math.round(r.phiOpt),Math.ceil(minPoleAngle(S.elev)));
   els.elev.value=S.elev; els.guy.value=S.guy;
   if(reduce)render(0);
 });
